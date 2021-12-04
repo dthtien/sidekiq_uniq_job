@@ -8,9 +8,19 @@ class DataProcessor
   include Sidekiq::Worker
 
   def perform(data, opts)
-    result = ProfGraySatelliteAnalysis::Analyzer.analyze_type(
-      data, { 'type' => opts['type'] }
-    )
-    Result.create!(data: data, analysis_type: opts['type'], result: result)
+    result = Result.find_or_initialize_by(data: data, analysis_type: opts['type'])
+    return if result.persisted?
+
+    result.save!
+    result.with_lock do
+      return if result.reload.result.present?
+
+      result.result = ProfGraySatelliteAnalysis::Analyzer.analyze_type(
+        data, { 'type' => opts['type'] }
+      )
+      result.save!
+    end
+  rescue StandardError => e
+    puts e.message
   end
 end
